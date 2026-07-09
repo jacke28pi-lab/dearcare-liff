@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    body { font-family: 'Sarabun', sans-serif; padding: 16px; background:#f5f7f6; color:#222; }
+    .card { background:#fff; border-radius:12px; padding:16px; box-shadow:0 1px 4px rgba(0,0,0,.08); margin-bottom:12px; }
+    h2 { color:#2E7D32; margin-top:0; }
+    .item { border-bottom:1px solid #eee; padding:8px 0; }
+    .item:last-child { border-bottom:none; }
+    .customer { font-weight:bold; }
+    button { width:100%; padding:14px; font-size:16px; border:none; border-radius:10px; margin-top:8px; }
+    .btn-confirm { background:#2E7D32; color:#fff; }
+    .btn-disabled { background:#ccc; color:#666; }
+    .msg { padding:12px; border-radius:8px; margin-top:10px; }
+    .msg-ok { background:#E8F5E9; color:#1B5E20; }
+    .msg-err { background:#FFEBEE; color:#B71C1C; }
+    .loading { text-align:center; color:#888; padding:20px; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">กำลังโหลดข้อมูล...</div>
+  <div id="content" style="display:none;">
+    <div class="card">
+      <h2>🔔 ยืนยันการปฏิบัติงาน</h2>
+      <div>🕒 เวลา : <span id="time"></span> &nbsp; 👥 เวร : <span id="shift"></span></div>
+    </div>
+    <div class="card" id="items"></div>
+    <button id="btnConfirm" class="btn-confirm">✅ ยืนยันว่าทำแล้ว</button>
+    <div id="resultMsg"></div>
+  </div>
+  <script>
+    const liffId = '2010654786-ORrNBmQL';
+    const webAppUrl = 'https://script.google.com/macros/s/AKfycbyrZiBVSDvuXmw0MUj4IvqYyOB_Qg1GLmBXk5-Lmom9SykzL8fJ5_tRtpRL_69r_S5H/exec';
+
+    function getParam(name) {
+      let sp = new URLSearchParams(location.search);
+      let v = sp.get(name);
+      if (v) return v;
+      let state = sp.get('liff.state');
+      if (state) {
+        if (state.indexOf('?') === 0) state = state.substring(1);
+        let sp2 = new URLSearchParams(state);
+        v = sp2.get(name);
+        if (v) return v;
+      }
+      return '';
+    }
+
+    const groupKey = getParam('groupKey');
+    const _override = new URLSearchParams(location.search).get('testLiff');
+    const effectiveLiffId = _override || liffId;
+    let profile = null;
+    let stage = 'start';
+
+    setTimeout(function () {
+      if (document.getElementById('content').style.display !== 'block') {
+        document.getElementById('loading').innerText = 'ค้างนานผิดปกติ(global) | groupKey=' + groupKey + ' | liffId=' + effectiveLiffId + ' | liffSDK='
+          + (typeof liff !== 'undefined' ? 'loaded' : 'NOT_LOADED') + ' | loggedIn=' + (typeof liff !== 'undefined' && liff.isLoggedIn ? liff.isLoggedIn() : '?')
+          + ' | inClient=' + (typeof liff !== 'undefined' && liff.isInClient ? liff.isInClient() : '?') + ' | profile=' + (profile ? profile.userId : 'null') + ' | stage=' + stage;
+      }
+    }, 8000);
+
+    function init() {
+      stage = 'calling liff.init';
+      liff.init({ liffId: effectiveLiffId }).then(function () {
+        stage = 'liff.init resolved';
+        if (liff.isInClient()) {
+          stage = 'inClient, calling getProfile';
+          return liff.getProfile();
+        }
+        if (!liff.isLoggedIn()) { stage = 'not logged in, calling login'; liff.login(); return null; }
+        stage = 'not inClient, calling getProfile';
+        return liff.getProfile();
+      }).then(function (p) {
+        stage = 'getProfile resolved';
+        if (!p) return;
+        profile = p;
+        loadDetail();
+      }).catch(function (err) {
+        stage = 'error: ' + (err && err.message);
+        document.getElementById('loading').innerText = 'LIFF init error: ' + (err && err.message) + ' | code=' + (err && err.code) + ' | liffId=' + liffId + ' | stack=' + (err && err.stack);
+      });
+    }
+
+    function loadDetail() {
+      fetch(webAppUrl + '?api=getGroupDetail&groupKey=' + encodeURIComponent(groupKey))
+        .then(function (r) { return r.json(); })
+        .then(renderDetail)
+        .catch(function (err) { renderError({ message: 'fetch error: ' + err }); });
+    }
+
+    function renderDetail(data) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      if (!data.ok) {
+        document.getElementById('items').innerHTML = '<div class="msg msg-err">' + data.message + '</div>';
+        document.getElementById('btnConfirm').style.display = 'none';
+        return;
+      }
+      document.getElementById('time').innerText = data.time;
+      document.getElementById('shift').innerText = data.shift;
+      const itemsHtml = data.items.map(function (it) {
+        return '<div class="item"><div class="customer">👤 ' + it.customer + '</div><div>' +
+          it.task.split('/').map(function(t){return '• ' + t.trim();}).join('<br>') + '</div></div>';
+      }).join('');
+      document.getElementById('items').innerHTML = itemsHtml;
+      if (data.status !== 'รอดำเนินการ') {
+        document.getElementById('btnConfirm').outerHTML = '<button class="btn-disabled" disabled>รายการนี้ถูกยืนยันแล้ว โดย ' + data.actorName + '</button>';
+      }
+    }
+
+    function renderError(err) {
+      document.getElementById('loading').innerText = 'เกิดข้อผิดพลาด: ' + (err && err.message) + ' | code=' + (err && err.code) + ' | ' + JSON.stringify(err);
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      document.getElementById('btnConfirm').addEventListener('click', function () {
+        this.disabled = true;
+        this.innerText = 'กำลังบันทึก...';
+        const body = new URLSearchParams();
+        body.set('api', 'confirmDone');
+        body.set('groupKey', groupKey);
+        body.set('userId', profile ? profile.userId : '');
+        body.set('displayName', profile ? profile.displayName : '');
+        fetch(webAppUrl, { method: 'POST', body: body })
+          .then(function (r) { return r.json(); })
+          .then(onConfirmResult)
+          .catch(function (err) { renderError({ message: 'fetch error: ' + err }); });
+      });
+      init();
+    });
+
+    function onConfirmResult(res) {
+      const box = document.getElementById('resultMsg');
+      if (res.ok) {
+        box.innerHTML = '<div class="msg msg-ok">✅ บันทึกเรียบร้อย ขอบคุณครับ/ค่ะ</div>';
+        setTimeout(function () { liff.closeWindow(); }, 1500);
+      } else {
+        box.innerHTML = '<div class="msg msg-err">' + res.message + '</div>';
+      }
+    }
+  </script>
+</body>
+</html>
