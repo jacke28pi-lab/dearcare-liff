@@ -22,6 +22,11 @@
     .msg-err { background:#FFEBEE; color:#B71C1C; }
     .loading { text-align:center; color:#888; padding:20px; }
     label { font-weight:bold; }
+    .reason-list { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+    .reason-btn { width:100%; text-align:left; padding:14px; font-size:16px; border:1px solid #ddd; border-radius:10px; background:#fafafa; color:#333; margin-top:0; }
+    .reason-btn:active { background:#eee; }
+    .reason-btn.selected { background:#FFEBEE; border-color:#B71C1C; color:#B71C1C; font-weight:bold; }
+    .reason-btn:disabled { opacity:.5; }
   </style>
 </head>
 <body>
@@ -34,22 +39,22 @@
     <div class="card" id="items"></div>
 
     <div class="card" id="reasonCard" style="display:none;">
-      <label>เหตุผล</label>
-      <select id="reason">
-        <option>ลูกค้านอนหลับ</option>
-        <option>ลูกค้าไม่ยอม</option>
-        <option>ญาติพาออกไป</option>
-        <option>ลูกค้าไปโรงพยาบาล</option>
-        <option>อื่น ๆ</option>
-      </select>
-      <div id="noteWrap" style="display:none; margin-top:8px;">
+      <label>กรุณาเลือกเหตุผล (แตะเพื่อเลือก)</label>
+      <div id="reasonList" class="reason-list">
+        <button type="button" class="reason-btn" data-reason="ลูกค้านอนหลับ">1. ลูกค้านอนหลับ</button>
+        <button type="button" class="reason-btn" data-reason="ลูกค้าไม่ยอม">2. ลูกค้าไม่ยอม</button>
+        <button type="button" class="reason-btn" data-reason="ญาติพาออกไป">3. ญาติพาออกไป</button>
+        <button type="button" class="reason-btn" data-reason="ลูกค้าไปโรงพยาบาล">4. ลูกค้าไปโรงพยาบาล</button>
+        <button type="button" class="reason-btn" data-reason="อื่น ๆ">5. อื่น ๆ (ระบุเอง)</button>
+      </div>
+      <div id="noteWrap" style="display:none; margin-top:10px;">
         <label>ระบุรายละเอียด</label>
         <textarea id="note" rows="3" placeholder="โปรดระบุเหตุผลเพิ่มเติม"></textarea>
+        <button id="btnSubmitOther" class="btn-submit">ส่งข้อมูล</button>
       </div>
     </div>
 
     <button id="btnConfirm" class="btn-confirm">✅ ยืนยันว่าทำแล้ว</button>
-    <button id="btnSubmit" class="btn-submit" style="display:none;">ส่งข้อมูล</button>
     <div id="resultMsg"></div>
   </div>
   <script>
@@ -124,13 +129,11 @@
         document.getElementById('cardTitle').innerText = '❌ แจ้งเหตุที่ยังไม่สามารถทำได้';
         document.getElementById('reasonCard').style.display = 'block';
         document.getElementById('btnConfirm').style.display = 'none';
-        document.getElementById('btnSubmit').style.display = 'block';
       }
 
       if (!data.ok) {
         document.getElementById('items').innerHTML = '<div class="msg msg-err">' + data.message + '</div>';
         document.getElementById('btnConfirm').style.display = 'none';
-        document.getElementById('btnSubmit').style.display = 'none';
         document.getElementById('reasonCard').style.display = 'none';
         return;
       }
@@ -143,10 +146,9 @@
       document.getElementById('items').innerHTML = itemsHtml;
       if (data.status !== 'รอดำเนินการ') {
         const doneBtn = document.getElementById('btnConfirm');
-        const submitBtn = document.getElementById('btnSubmit');
         const disabledHtml = '<button class="btn-disabled" disabled>รายการนี้ถูกยืนยันแล้ว โดย ' + data.actorName + '</button>';
-        if (isReason) { submitBtn.outerHTML = disabledHtml; } else { doneBtn.outerHTML = disabledHtml; }
-        document.getElementById('reasonCard').style.display = 'none';
+        if (isReason) { document.getElementById('reasonCard').outerHTML = disabledHtml; }
+        else { doneBtn.outerHTML = disabledHtml; }
       }
     }
 
@@ -154,11 +156,48 @@
       document.getElementById('loading').innerText = 'เกิดข้อผิดพลาด: ' + (err && err.message) + ' | code=' + (err && err.code) + ' | ' + JSON.stringify(err);
     }
 
+    function lockReasonButtons() {
+      document.querySelectorAll('.reason-btn').forEach(function (b) { b.disabled = true; });
+      const other = document.getElementById('btnSubmitOther');
+      if (other) other.disabled = true;
+    }
+
+    function submitReason(reason, note) {
+      lockReasonButtons();
+      const body = new URLSearchParams();
+      body.set('api', 'confirmNotDone');
+      body.set('groupKey', groupKey);
+      body.set('userId', profile ? profile.userId : '');
+      body.set('displayName', profile ? profile.displayName : '');
+      body.set('reason', reason);
+      body.set('note', note || '');
+      fetch(webAppUrl, { method: 'POST', body: body })
+        .then(function (r) { return r.json(); })
+        .then(onConfirmResult)
+        .catch(function (err) { renderError({ message: 'fetch error: ' + err }); });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
-      const reasonSel = document.getElementById('reason');
-      if (reasonSel) {
-        reasonSel.addEventListener('change', function () {
-          document.getElementById('noteWrap').style.display = this.value === 'อื่น ๆ' ? 'block' : 'none';
+      document.querySelectorAll('.reason-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const reason = this.getAttribute('data-reason');
+          document.querySelectorAll('.reason-btn').forEach(function (b) { b.classList.remove('selected'); });
+          this.classList.add('selected');
+          if (reason === 'อื่น ๆ') {
+            document.getElementById('noteWrap').style.display = 'block';
+            return;
+          }
+          document.getElementById('noteWrap').style.display = 'none';
+          submitReason(reason, '');
+        });
+      });
+
+      const btnSubmitOther = document.getElementById('btnSubmitOther');
+      if (btnSubmitOther) {
+        btnSubmitOther.addEventListener('click', function () {
+          const note = document.getElementById('note').value.trim();
+          if (!note) { alert('กรุณาระบุรายละเอียดก่อนส่งข้อมูล'); return; }
+          submitReason('อื่น ๆ', note);
         });
       }
 
@@ -176,32 +215,19 @@
           .catch(function (err) { renderError({ message: 'fetch error: ' + err }); });
       });
 
-      document.getElementById('btnSubmit').addEventListener('click', function () {
-        this.disabled = true;
-        this.innerText = 'กำลังบันทึก...';
-        const reason = document.getElementById('reason').value;
-        const note = document.getElementById('note').value;
-        const body = new URLSearchParams();
-        body.set('api', 'confirmNotDone');
-        body.set('groupKey', groupKey);
-        body.set('userId', profile ? profile.userId : '');
-        body.set('displayName', profile ? profile.displayName : '');
-        body.set('reason', reason);
-        body.set('note', note);
-        fetch(webAppUrl, { method: 'POST', body: body })
-          .then(function (r) { return r.json(); })
-          .then(onConfirmResult)
-          .catch(function (err) { renderError({ message: 'fetch error: ' + err }); });
-      });
-
       init();
     });
 
     function onConfirmResult(res) {
       const box = document.getElementById('resultMsg');
       if (res.ok) {
-        box.innerHTML = '<div class="msg msg-ok">✅ บันทึกเรียบร้อย ขอบคุณครับ/ค่ะ</div>';
-        setTimeout(function () { liff.closeWindow(); }, 1500);
+        const who = res.actorName ? ' โดย ' + res.actorName : '';
+        if (isReason) {
+          box.innerHTML = '<div class="msg msg-ok">✅ บันทึกเรียบร้อย' + who + '<br>เหตุผล : ' + (res.reasonText || '') + '</div>';
+        } else {
+          box.innerHTML = '<div class="msg msg-ok">✅ บันทึกเรียบร้อย' + who + ' ขอบคุณครับ/ค่ะ</div>';
+        }
+        setTimeout(function () { liff.closeWindow(); }, 1800);
       } else {
         box.innerHTML = '<div class="msg msg-err">' + res.message + '</div>';
       }
